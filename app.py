@@ -1,18 +1,14 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
-import time
 import uuid
+import time
 from collections import defaultdict, deque
 import os
 
 app = FastAPI()
 
-# =========================
-# CONFIG
-# =========================
-
-EMAIL = os.getenv("EMAIL", "your_email@example.com")
+EMAIL = "24f2000581@ds.study.iitm.ac.in"
 
 ALLOWED_ORIGIN = "https://app-kb6lf9.example.com"
 
@@ -22,7 +18,7 @@ WINDOW = 10
 client_store = defaultdict(deque)
 
 # =========================
-# CORS (DO THIS FIRST)
+# ONLY CORS (NO CUSTOM CORS)
 # =========================
 
 app.add_middleware(
@@ -39,6 +35,9 @@ app.add_middleware(
 
 @app.middleware("http")
 async def rate_limit(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
     client_id = request.headers.get("X-Client-Id", "anonymous")
 
     now = time.time()
@@ -50,16 +49,11 @@ async def rate_limit(request: Request, call_next):
         q.popleft()
 
     if len(q) >= RATE_LIMIT:
-        return JSONResponse(
-            status_code=429,
-            content={"error": "rate limit exceeded"}
-        )
+        return JSONResponse(status_code=429, content={"error": "rate limit exceeded"})
 
     q.append(now)
 
-    response = await call_next(request)
-    return response
-
+    return await call_next(request)
 
 # =========================
 # REQUEST ID MIDDLEWARE
@@ -68,29 +62,21 @@ async def rate_limit(request: Request, call_next):
 @app.middleware("http")
 async def request_id(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
-    request.state.request_id = request_id
 
     response = await call_next(request)
 
     response.headers["X-Request-ID"] = request_id
     return response
 
-
 # =========================
-# ENDPOINTS
+# ENDPOINT
 # =========================
 
 @app.get("/ping")
-@app.get("/ping/ping")
 async def ping(request: Request):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+
     return {
         "email": EMAIL,
-        "request_id": request.state.request_id
+        "request_id": request_id
     }
-
-
-# OPTIONAL: explicit OPTIONS safety (prevents 405 issues)
-@app.options("/ping")
-@app.options("/ping/ping")
-async def options_handler():
-    return JSONResponse(content={"ok": True})
