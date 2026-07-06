@@ -16,53 +16,29 @@ EMAIL = os.getenv("EMAIL", "your_email@example.com")
 
 ALLOWED_ORIGIN = "https://app-kb6lf9.example.com"
 
-RATE_LIMIT = 8   # B requests
-WINDOW = 10      # seconds
-
-# =========================
-# STORAGE
-# =========================
+RATE_LIMIT = 8
+WINDOW = 10
 
 client_store = defaultdict(deque)
 
 # =========================
-# CORS (STRICT)
+# CORS (DO THIS FIRST)
 # =========================
 
-@app.middleware("http")
-async def cors_middleware(request: Request, call_next):
-    response = await call_next(request)
-
-    origin = request.headers.get("origin")
-
-    # Only allow assigned origin
-    if origin == ALLOWED_ORIGIN:
-        response.headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGIN
-
-    return response
-
-
-# =========================
-# REQUEST CONTEXT MIDDLEWARE
-# =========================
-
-@app.middleware("http")
-async def request_id_middleware(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
-    request.state.request_id = request_id
-
-    response = await call_next(request)
-
-    response.headers["X-Request-ID"] = request_id
-    return response
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[ALLOWED_ORIGIN],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # =========================
 # RATE LIMIT MIDDLEWARE
 # =========================
 
 @app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next):
+async def rate_limit(request: Request, call_next):
     client_id = request.headers.get("X-Client-Id", "anonymous")
 
     now = time.time()
@@ -70,7 +46,6 @@ async def rate_limit_middleware(request: Request, call_next):
 
     q = client_store[client_id]
 
-    # remove old requests
     while q and q[0] < window_start:
         q.popleft()
 
@@ -82,16 +57,40 @@ async def rate_limit_middleware(request: Request, call_next):
 
     q.append(now)
 
-    return await call_next(request)
+    response = await call_next(request)
+    return response
 
 
 # =========================
-# ENDPOINT
+# REQUEST ID MIDDLEWARE
+# =========================
+
+@app.middleware("http")
+async def request_id(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
+
+    response = await call_next(request)
+
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+# =========================
+# ENDPOINTS
 # =========================
 
 @app.get("/ping")
+@app.get("/ping/ping")
 async def ping(request: Request):
     return {
         "email": EMAIL,
         "request_id": request.state.request_id
     }
+
+
+# OPTIONAL: explicit OPTIONS safety (prevents 405 issues)
+@app.options("/ping")
+@app.options("/ping/ping")
+async def options_handler():
+    return JSONResponse(content={"ok": True})
